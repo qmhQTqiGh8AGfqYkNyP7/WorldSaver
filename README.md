@@ -20,11 +20,11 @@ Install using [Tampermonkey](http://tampermonkey.net/) extesion for your browser
 3. Text may not render exactly as original, as script uses different HTML layout for better performance
 
 ### To do list
-[ ] JSON export
-[ ] Make screenshot and export JSON as .zippng
-[ ] Store previoulsy saved file and show diff
-[ ] Save HTML prompt
-[ ] Option to change area to save
-[ ] Automatically detect size of area to save
-[ ] Option to change CSS style
-[ ] Option to choose between original and new HTML layout
+- [ ] JSON export
+- [ ] Make screenshot and export JSON as .zippng
+- [ ] Store previoulsy saved file and show diff
+- [ ] Save HTML prompt
+- [ ] Option to change area to save
+- [ ] Automatically detect size of area to save
+- [ ] Option to change CSS style
+- [ ] Option to choose between original and new HTML layout
