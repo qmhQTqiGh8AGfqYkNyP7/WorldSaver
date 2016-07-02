@@ -2,7 +2,7 @@
 // @name         WorldSaver
 // @namespace    https://github.com/qmhQTqiGh8AGfqYkNyP7/WorldSaver
 // @icon         http://www.yourworldoftext.com/static/favicon.png
-// @version      0.1
+// @version      0.2
 // @description  Allows to save yourworldoftext.com worlds as raw HTML
 // @author       Nipah~
 // @match        http://www.yourworldoftext.com/*
@@ -18,7 +18,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.1';
+    const VERSION = '0.2';
     const CHUNK_TILES_X = 20;  // number of tiles in one request
     const CHUNK_TILES_Y = 20;  // number of tiles in one request
     const TILE_ROWS = 8;  // number of letters
