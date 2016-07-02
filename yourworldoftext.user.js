@@ -6,6 +6,7 @@
 // @description  Allows to save yourworldoftext.com worlds as raw HTML
 // @author       Nipah~
 // @match        http://www.yourworldoftext.com/*
+// @match        https://www.yourworldoftext.com/*
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
@@ -39,17 +40,17 @@
         color: white;
         background-color: black;
     }
-    .cell {
+    .tile {
         position: absolute;
         overflow: hidden;
         width: 160px;
         height: 144px;
     }
-    .cell table {
+    .tile table {
         line-height: 18px;
         table-layout: fixed;
     }
-    .cell table tr {
+    .tile table tr {
         height: 18px;
     }
     </style>
@@ -63,113 +64,168 @@
         <div id="meta_settings"></div>
         <div id="meta_source"></div>
     </div>
-    <div id="container"></div>
+    <div id="container">
+        <div id="loading">Loading...</div>
+        <div id="progress">0%</div>
+    </div>
 </body>
 </html>`
 ];
 
-    var settings = {
-        minX: -8,
-        minY: -8,
-        maxX: 10,
-        maxY: 12
-    };
 
-    var cell_rows = 8;  // number of letters
-    var cell_cols = 16;  // number of letters
-    var cell_width = 160;  // in pixels
-    var cell_height = 144;  // in pixels
-    var chunk_size_x = 20;  // number of tiles in one ajax request
-    var chunk_size_y = 20;  // number of tiles in one ajax request
+    class Chunk {
+        //  Chunk represents range of Tiles in one request
+        constructor(min_tileX, min_tileY, max_tileX, max_tileY) {
+            this.min_tileX = min_tileX;  // top left corner
+            this.min_tileY = min_tileY;  // top left corner
+            this.max_tileX = max_tileX;  // bottom right corner
+            this.max_tileY = max_tileY;  // bottom right corner
+        }
 
-    Permissions.can_paste = function() {return true;};
-    Permissions.can_go_to_coord = function(user, world) {return true;};
+        static fromChunkCoords(chunkX, chunkY) {
+            const CHUNK_TILES_X = 20;  // number of tiles in one request
+            const CHUNK_TILES_Y = 20;  // number of tiles in one request
+            const x = chunkX * CHUNK_TILES_X;
+            const y = chunkY * CHUNK_TILES_Y;
+            return new Chunk(x, y, (x + CHUNK_TILES_X - 1), (y + CHUNK_TILES_Y - 1));
+        }
 
-    // Permissions.can_admin = function(user, world) {return true;};
-    // Permissions.can_coordlink = function(user, world, opt_tile) {return true;};
-    // Permissions.can_edit_tile = function(user, world, tile) {return true;};
-    // Permissions.can_protect_tiles = function(user, world) {return true;};
-    // Permissions.can_read = function(user, world) {return true;};
-    // Permissions.can_urllink = function(user, world, opt_tile) {return true;};
-    // Permissions.can_write = function(user, world) {return true;};
+        get tilesX() {
+            return this.max_tileX - this.min_tileX;
+        }
 
-    function setCellCoords(cell, coords, worldBorders) {
-        var y = parseInt(coords[0], 10) - worldBorders.min_tileY;
-        var x = parseInt(coords[1], 10) - worldBorders.min_tileX;
-        cell.style.left = (x * cell_width) + 'px';
-        cell.style.top = (y * (cell_height - 1)) + 'px';
+        get tilesY() {
+            return this.max_tileY - this.min_tileY;
+        }
+
+        toString() {
+            return JSON.stringify(this);
+        }
     }
 
-    function createCell_plain(coords, celldata, worldBorders) {
-        var cell = document.createElement('div');
-        cell.className = 'cell';
-        cell.title = coords.join(';');
-        setCellCoords(cell, coords, worldBorders);
 
-        var content_chars = celldata.content.split('');
+    class Tile {
+        // Tile contains 8 rows of 16 letters each
+        constructor(tileX, tileY, content, properties) {
+            this.tileX = tileX;
+            this.tileY = tileY;
+            this.content = content;
+            this.properties = properties;
+        }
+
+        static fromTileData(tileKey, tileObj) {
+            if (!tileObj || !tileObj.content || !/\S/.test(tileObj.content)) {
+                return null;
+            }
+            const coords = tileKey.split(',');
+            const y = parseInt(coords[0], 10);
+            const x = parseInt(coords[1], 10);
+            return new Tile(x, y, tileObj.content, tileObj.properties);
+        }
+
+        get isEmpty() {
+            return !this.content || !/\S/.test(this.content);
+        }
+
+        toString() {
+            return [this.tileY, this.tileX].join(';');
+        }
+    }
+
+
+    var settings = {
+        min_tileX: -1,
+        min_tileY: -1,
+        max_tileX: 1,
+        max_tileY: 1
+    };
+
+    const TILE_ROWS = 8;  // number of letters
+    const TILE_COLS = 16;  // number of letters
+    const TILE_WIDTH = 160;  // in pixels
+    const TILE_HEIGHT = 144;  // in pixels
+
+    // Permissions.can_paste = function() {return true;};
+    // Permissions.can_go_to_coord = function(user, world) {return true;};
+
+    function fillTileDiv_plain(tileDiv, chars) {
         var content = '';
-        for (var i = 0; i < cell_rows; i++) {
-            for (var j = 0; j < cell_cols; j++) {
-                var c = content_chars[i * cell_cols + j];
+        // separate string to lines
+        for (var i = 0; i < TILE_ROWS; i++) {
+            for (var j = 0; j < TILE_COLS; j++) {
+                var c = chars[i * TILE_COLS + j];
                 if (c) {
                     content += c;
                 }
             }
-            if (i < cell_rows - 1) {
+            if (i < TILE_ROWS - 1) {
                 content += '\n';
             }
         }
-        cell.innerText = content;
-        return cell;
+        tileDiv.innerText = content;
     }
 
     // VERY slow
-    /*function createCell_table(coords, celldata, worldBorders) {
-        var cell = $('<div class="cell"><table width="100%" cellspacing="0" cellpadding="0" border="0"><tbody>');
-        cell.attr('title', coords.join(';'));
-        setCellCoords(cell, coords, worldBorders);
-        var tbody = cell.find('tbody');
+    function fillTileDiv_table(tileDiv, chars) {
+        tileDiv.insertAdjacentHTML('afterbegin',
+            `<table width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tbody></tbody>
+            </table>`
+        );
 
-        var content_chars = celldata.content.split('');
-        for (var i = 0; i < cell_rows; i++) {
-            var tr = $('<tr>');
-            for (var j = 0; j < cell_cols; j++) {
-                var td = $('<td>');
-                var c = content_chars[i * cell_cols + j];
+        const tbody = tileDiv.querySelector('tbody');
+        var content = '';
+        // separate string to lines
+        for (var i = 0; i < TILE_ROWS; i++) {
+            var tr = document.createElement('tr');
+            for (var j = 0; j < TILE_COLS; j++) {
+                var td = document.createElement('td');
+                var c = chars[i * TILE_COLS + j];
                 if (c) {
-                    td.text(c);
+                    td.innerText = c;
                 }
-                tr.append(td);
+                tr.appendChild(td);
             }
-            tbody.append(tr);
+            tbody.appendChild(tr);
         }
-        return cell;
-    }*/
-
-    function make_chunk(x, y) {
-        x *= chunk_size_x;
-        y *= chunk_size_y;
-        return {min_tileX: x, min_tileY: y, max_tileX: (x + chunk_size_x - 1), max_tileY: (y + chunk_size_y - 1)};
     }
+
+
+    function createTileDiv(tile, worldBorders) {
+        const tileDiv = document.createElement('div');
+        tileDiv.className = 'tile';
+        tileDiv.title = tile.toString();
+        const y = tile.tileY - worldBorders.min_tileY;
+        const x = tile.tileX - worldBorders.min_tileX;
+        tileDiv.style.left = (x * TILE_WIDTH) + 'px';
+        tileDiv.style.top = (y * (TILE_HEIGHT - 1)) + 'px';
+        fillTileDiv_plain(tileDiv, tile.content.split(''));
+        // fillTileDiv_table(tileDiv, tile.content.split(''));
+        return tileDiv;
+    }
+
 
     function make_chunks(minX, minY, maxX, maxY) {
         var chunks = [];
         for (var x = minX; x <= maxX; x++) {
             for (var y = minY; y <= maxY; y++) {
-                chunks.push(make_chunk(x, y));
+                chunks.push(Chunk.fromChunkCoords(x, y));
             }
         }
         return chunks;
     }
 
-    // create button
-    document.querySelector('#nav').insertAdjacentHTML('beforeend',
-`<li class="" style="border-top-width: 1px; border-top-style: solid; border-top-color: rgb(204, 204, 204);">
-    <div id="ywscript-btn">Save this world</div>
-</li>`);
+
+    function createGui() {
+        // create button
+        document.querySelector('#nav ul').insertAdjacentHTML('beforeend',
+            `<li>
+                <div id="ywscript-btn">Save this world</div>
+            </li>`);
+    }
 
 
-    document.querySelector('#ywscript-btn').addEventListener('click', function(event) {
+    function createHtmlDoc() {
         var newWindow = window.open();
         var doc = newWindow.document;
         doc.write(HTML_TEMPLATE);
@@ -186,79 +242,136 @@
         doc.querySelector('#meta_date').innerText = d.toISOString();
         doc.querySelector('#meta_version').innerText = VERSION;
         doc.querySelector('#meta_settings').innerText = JSON.stringify(settings);
-        var container = doc.body.querySelector('#container');
-        container.insertAdjacentHTML('afterbegin', '<div id="loading">Loading...</div>');
-        container.insertAdjacentHTML('beforeend', '<div id="progress">0%</div>');
+        return doc;
+    }
 
-        var recievedObjects = [];
-        var ranges = make_chunks(settings.minX, settings.minY, settings.maxX, settings.maxY);
-        var totalRanges = ranges.length;
 
-        function get_tile(range, onFinish) {
+    function makeXMLHttpPromise(chunk, resolve, reject) {
+        let promise = new Promise(function(resolve, reject) {
             var request = new XMLHttpRequest();
-            request.onreadystatechange = function() {
-                if (request.readyState === XMLHttpRequest.DONE) {
-                    var data = JSON.parse(request.response);
-                    recievedObjects.push(data);
-                    doc.body.querySelector('#progress').innerText = Math.floor((100 * (totalRanges - ranges.length)) / totalRanges) + '%';
-                    if (ranges.length > 0) {
-                        get_tile(ranges.pop(), onFinish);
-                    } else {
-                        onFinish();
-                    }
-                }
-            };
-
-            var url = window.location.pathname + '?fetch=1';
-            url += '&min_tileY=' + range.min_tileY;
-            url += '&min_tileX=' + range.min_tileX;
-            url += '&max_tileY=' + range.max_tileY;
-            url += '&max_tileX=' + range.max_tileX;
+            let url = window.location.pathname + '?fetch=1';
+            url += '&min_chunkY=' + chunk.minY;
+            url += '&min_chunkX=' + chunk.minX;
+            url += '&max_chunkY=' + chunk.maxY;
+            url += '&max_chunkX=' + chunk.maxX;
             url += '&v=3';
             request.open('GET', url);
             request.send(null);
-        }
 
-        get_tile(ranges.pop(), function() {
-            container.innerHTML = '';
-            var map = {};
-            var min_tileX;
-            var min_tileY;
-            var max_tileX;
-            var max_tileY;
+            request.onload = function() {
+                if (request.readyState === XMLHttpRequest.DONE) {
+                    resolve(request.response);
+                } else {
+                    reject(request.statusText);
+                }
+            };
+            request.onerror = function() {
+                reject(request.statusText);
+            };
+        });
 
-            for (var i = 0; i < recievedObjects.length; i++) {
-                var currentObj = recievedObjects[i];
-                for (var attrname in currentObj) {
-                    var celldata = currentObj[attrname];
-                    if (!celldata || !celldata.content || !/\S/.test(celldata.content)) {
-                        continue;
-                    }
-                    map[attrname] = celldata;
+        return promise;
+    }
 
-                    var coords = attrname.split(',');
-                    var y = parseInt(coords[0], 10);
-                    var x = parseInt(coords[1], 10);
-                    if (min_tileX === undefined || min_tileY === undefined ||
-                        max_tileX === undefined || max_tileY === undefined) {
-                        min_tileX = x;
-                        min_tileY = y;
-                        max_tileX = x;
-                        max_tileY = y;
-                    } else {
-                        min_tileX = Math.min(min_tileX, x);
-                        min_tileY = Math.min(min_tileY, y);
-                        max_tileX = Math.max(max_tileX, x);
-                        max_tileY = Math.max(max_tileY, y);
-                    }
+
+    var getWebSocket = (function() {
+        let ws_scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        let path = window.location.pathname.replace(/\/$/, '');
+        let ws_path = ws_scheme + "://" + window.location.host + path + "/ws/";
+        var socket = new WebSocket(ws_path);
+        return function() {
+            return socket;
+        };
+    })();
+
+
+    function makeWebSocketPromise(chunk, resolve, reject) {
+        return new Promise(function(resolve, reject) {
+            let socket = getWebSocket();
+
+            socket.onmessage = function(event) {
+                let data = JSON.parse(event.data);
+                if (data.kind === 'fetch') {
+                    resolve(data.tiles);
+                }
+            };
+
+            socket.onclose = function(event) {
+                reject(event.reason);
+            };
+
+            let data = {
+                kind: "fetch",
+                min_tileY: chunk.min_tileY,
+                min_tileX: chunk.min_tileX,
+                max_tileY: chunk.max_tileY,
+                max_tileX: chunk.max_tileX,
+                v: 3
+            };
+            socket.send(JSON.stringify(data));
+        });
+    }
+
+
+    function requestForChunk(chunk, resolve, reject) {
+        return makeWebSocketPromise(chunk, resolve, reject);
+        // return makeXMLHttpPromise(chunk, resolve, reject);
+    }
+
+
+    createGui();
+    document.querySelector('#ywscript-btn').addEventListener('click', function(event) {
+        var doc = createHtmlDoc();
+        var ranges = make_chunks(settings.min_tileX, settings.min_tileY, settings.max_tileX, settings.max_tileY);
+        var totalRanges = ranges.length;
+        var map = {};
+        var worldBorders = {};
+        var recievedTiles = [];
+
+        function processResponse(tiles) {
+            for (let tileKey in tiles) {
+                let tileObj = tiles[tileKey];
+                let tile = Tile.fromTileData(tileKey, tileObj);
+                if (!tile) {
+                    continue;
+                }
+                map[tileKey] = tileObj;
+                recievedTiles.push(tile);
+                if (worldBorders.min_tileX === undefined) {
+                    worldBorders.min_tileX = tile.tileX;
+                    worldBorders.min_tileY = tile.tileY;
+                    worldBorders.max_tileX = tile.tileX;
+                    worldBorders.max_tileY = tile.tileY;
+                } else {
+                    worldBorders.min_tileX = Math.min(worldBorders.min_tileX, tile.tileX);
+                    worldBorders.min_tileY = Math.min(worldBorders.min_tileY, tile.tileY);
+                    worldBorders.max_tileX = Math.max(worldBorders.max_tileX, tile.tileX);
+                    worldBorders.max_tileY = Math.max(worldBorders.max_tileY, tile.tileY);
                 }
             }
+        }
+
+        function get_chunk(chunk, onFinish) {
+            requestForChunk(chunk)
+                .then(function(response) {
+                    processResponse(response);
+                    doc.body.querySelector('#progress').innerText = Math.floor((100 * (totalRanges - ranges.length)) / totalRanges) + '%';
+                    if (ranges.length > 0) {
+                        get_chunk(ranges.pop(), onFinish);
+                    } else {
+                        onFinish();
+                    }
+                });
+        }
+
+        get_chunk(ranges.pop(), function() {
+            doc.body.querySelector('#container').innerHTML = '';
             doc.querySelector('#meta_source').innerText = JSON.stringify(map);
-            var worldBorders = {min_tileX: min_tileX, min_tileY: min_tileY, max_tileX: max_tileX, max_tileY: max_tileY};
-            for (var key in map) {
-                // var cell = createCell_table(key.split(','), map[key], worldBorders);
-                var cell = createCell_plain(key.split(','), map[key], worldBorders);
-                doc.body.querySelector('#container').appendChild(cell);
+
+            for (var i = 0; i < recievedTiles.length; i++) {
+                var currentTile = recievedTiles[i];
+                var tileDiv = createTileDiv(currentTile, worldBorders);
+                doc.body.querySelector('#container').appendChild(tileDiv);
             }
         });
     });
