@@ -24,7 +24,8 @@ Install using [Tampermonkey](http://tampermonkey.net/) extesion for your browser
 - [ ] Make screenshot and export JSON as .zippng
 - [ ] Store previoulsy saved file and show diff
 - [ ] Save HTML prompt
-- [ ] Option to change area to save
-- [ ] Automatically detect size of area to save
+- [ ] Option to change size of area to save
+- [x] Automatically detect size of area to save
+- [ ] Preserve original CSS
 - [ ] Option to change CSS style
 - [ ] Option to choose between original and new HTML layout

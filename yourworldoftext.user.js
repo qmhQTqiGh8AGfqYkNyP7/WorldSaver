@@ -18,8 +18,14 @@
 (function () {
     'use strict';
 
-    var VERSION = '0.1';
-    var HTML_TEMPLATE = [
+    const VERSION = '0.1';
+    const CHUNK_TILES_X = 20;  // number of tiles in one request
+    const CHUNK_TILES_Y = 20;  // number of tiles in one request
+    const TILE_ROWS = 8;  // number of letters
+    const TILE_COLS = 16;  // number of letters
+    const TILE_WIDTH = 160;  // in pixels
+    const TILE_HEIGHT = 144;  // in pixels
+    const  HTML_TEMPLATE = [
 `<!DOCTYPE html>
 <html>
 <head>
@@ -80,13 +86,13 @@
             this.min_tileY = min_tileY;  // top left corner
             this.max_tileX = max_tileX;  // bottom right corner
             this.max_tileY = max_tileY;  // bottom right corner
+            this.x = Math.floor(min_tileX / CHUNK_TILES_X);
+            this.y = Math.floor(min_tileY / CHUNK_TILES_Y);
         }
 
-        static fromChunkCoords(chunkX, chunkY) {
-            const CHUNK_TILES_X = 20;  // number of tiles in one request
-            const CHUNK_TILES_Y = 20;  // number of tiles in one request
-            const x = chunkX * CHUNK_TILES_X;
-            const y = chunkY * CHUNK_TILES_Y;
+        static fromPoint(point) {
+            const x = point.x * CHUNK_TILES_X;
+            const y = point.y * CHUNK_TILES_Y;
             return new Chunk(x, y, (x + CHUNK_TILES_X - 1), (y + CHUNK_TILES_Y - 1));
         }
 
@@ -99,16 +105,27 @@
         }
 
         toString() {
-            return JSON.stringify(this);
+            return [this.min_tileY, this.min_tileX].join(';');
         }
     }
 
 
-    class Tile {
+    class Point {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+        }
+
+        toString() {
+            return [this.y, this.x].join(';');
+        }
+    }
+
+
+    class Tile extends Point {
         // Tile contains 8 rows of 16 letters each
-        constructor(tileX, tileY, content, properties) {
-            this.tileX = tileX;
-            this.tileY = tileY;
+        constructor(x, y, content, properties) {
+            super(x, y);
             this.content = content;
             this.properties = properties;
         }
@@ -126,10 +143,6 @@
         get isEmpty() {
             return !this.content || !/\S/.test(this.content);
         }
-
-        toString() {
-            return [this.tileY, this.tileX].join(';');
-        }
     }
 
 
@@ -137,14 +150,9 @@
         min_tileX: -1,
         min_tileY: -1,
         max_tileX: 1,
-        max_tileY: 1
+        max_tileY: 1,
+        N: 1
     };
-
-    const TILE_ROWS = 8;  // number of letters
-    const TILE_COLS = 16;  // number of letters
-    const TILE_WIDTH = 160;  // in pixels
-    const TILE_HEIGHT = 144;  // in pixels
-
     // Permissions.can_paste = function() {return true;};
     // Permissions.can_go_to_coord = function(user, world) {return true;};
 
@@ -195,8 +203,8 @@
         const tileDiv = document.createElement('div');
         tileDiv.className = 'tile';
         tileDiv.title = tile.toString();
-        const y = tile.tileY - worldBorders.min_tileY;
-        const x = tile.tileX - worldBorders.min_tileX;
+        const y = tile.y - worldBorders.min_tileY;
+        const x = tile.x - worldBorders.min_tileX;
         tileDiv.style.left = (x * TILE_WIDTH) + 'px';
         tileDiv.style.top = (y * (TILE_HEIGHT - 1)) + 'px';
         fillTileDiv_plain(tileDiv, tile.content.split(''));
@@ -209,7 +217,7 @@
         var chunks = [];
         for (var x = minX; x <= maxX; x++) {
             for (var y = minY; y <= maxY; y++) {
-                chunks.push(Chunk.fromChunkCoords(x, y));
+                chunks.push(Chunk.fromPoint(new Point(x, y)));
             }
         }
         return chunks;
@@ -250,10 +258,10 @@
         let promise = new Promise(function(resolve, reject) {
             var request = new XMLHttpRequest();
             let url = window.location.pathname + '?fetch=1';
-            url += '&min_chunkY=' + chunk.minY;
-            url += '&min_chunkX=' + chunk.minX;
-            url += '&max_chunkY=' + chunk.maxY;
-            url += '&max_chunkX=' + chunk.maxX;
+            url += '&min_tileY=' + chunk.min_tileY;
+            url += '&min_tileX=' + chunk.min_tileX;
+            url += '&max_tileY=' + chunk.max_tileY;
+            url += '&max_tileX=' + chunk.max_tileX;
             url += '&v=3';
             request.open('GET', url);
             request.send(null);
@@ -322,49 +330,77 @@
     createGui();
     document.querySelector('#ywscript-btn').addEventListener('click', function(event) {
         var doc = createHtmlDoc();
-        var ranges = make_chunks(settings.min_tileX, settings.min_tileY, settings.max_tileX, settings.max_tileY);
-        var totalRanges = ranges.length;
+        var processedChunks = {};  // dictionary with coordinates
+        var processingQueue = [];  // array of Chunk instances
+        var recievedTiles = [];  // array of Tile instances
         var map = {};
         var worldBorders = {};
-        var recievedTiles = [];
+        // processingQueue = make_chunks(settings.min_tileX, settings.min_tileY, settings.max_tileX, settings.max_tileY);
+        // var totalRanges = processingQueue.length;
 
         function processResponse(tiles) {
+            let notEmpty = false;
             for (let tileKey in tiles) {
                 let tileObj = tiles[tileKey];
                 let tile = Tile.fromTileData(tileKey, tileObj);
                 if (!tile) {
                     continue;
                 }
+                notEmpty = true;
                 map[tileKey] = tileObj;
                 recievedTiles.push(tile);
                 if (worldBorders.min_tileX === undefined) {
-                    worldBorders.min_tileX = tile.tileX;
-                    worldBorders.min_tileY = tile.tileY;
-                    worldBorders.max_tileX = tile.tileX;
-                    worldBorders.max_tileY = tile.tileY;
+                    worldBorders.min_tileX = tile.x;
+                    worldBorders.min_tileY = tile.y;
+                    worldBorders.max_tileX = tile.x;
+                    worldBorders.max_tileY = tile.y;
                 } else {
-                    worldBorders.min_tileX = Math.min(worldBorders.min_tileX, tile.tileX);
-                    worldBorders.min_tileY = Math.min(worldBorders.min_tileY, tile.tileY);
-                    worldBorders.max_tileX = Math.max(worldBorders.max_tileX, tile.tileX);
-                    worldBorders.max_tileY = Math.max(worldBorders.max_tileY, tile.tileY);
+                    worldBorders.min_tileX = Math.min(worldBorders.min_tileX, tile.x);
+                    worldBorders.min_tileY = Math.min(worldBorders.min_tileY, tile.y);
+                    worldBorders.max_tileX = Math.max(worldBorders.max_tileX, tile.x);
+                    worldBorders.max_tileY = Math.max(worldBorders.max_tileY, tile.y);
+                }
+            }
+            doc.body.querySelector('#progress').innerText = recievedTiles.length;
+            return notEmpty;
+        }
+
+        // Yuki N.
+        function processNeighbours(chunk, queue, N) {
+            var searchAreaLeftBound = chunk.x - N - 1;
+            var searchAreaRightBound = chunk.x + N + 1;
+            var searchAreaUpperBound = chunk.y - N - 1;
+            var searchAreaLowerBound = chunk.y + N + 1;
+            for (var pX = searchAreaLeftBound; pX <= searchAreaRightBound; pX++) {
+                for(var pY = searchAreaUpperBound; pY <= searchAreaLowerBound; pY++) {
+                    var potentialChunk = Chunk.fromPoint(new Point(pX, pY));
+                    if (!processedChunks[potentialChunk.toString()]) {
+                        queue.push(potentialChunk);
+                    }
                 }
             }
         }
 
-        function get_chunk(chunk, onFinish) {
+
+        function getNonEmptyChunks(chunk, onFinish) {
             requestForChunk(chunk)
                 .then(function(response) {
-                    processResponse(response);
-                    doc.body.querySelector('#progress').innerText = Math.floor((100 * (totalRanges - ranges.length)) / totalRanges) + '%';
-                    if (ranges.length > 0) {
-                        get_chunk(ranges.pop(), onFinish);
+                    let notEmpty = processResponse(response);
+                    processedChunks[chunk.toString()] = true;
+                    if (notEmpty) {
+                        processNeighbours(chunk, processingQueue, settings.N);
+                    }
+                    // doc.body.querySelector('#progress').innerText = Math.floor((100 * (totalRanges - processingQueue.length)) / totalRanges) + '%';
+                    if (processingQueue.length > 0) {
+                        getNonEmptyChunks(processingQueue.pop(), onFinish);
                     } else {
                         onFinish();
                     }
                 });
         }
 
-        get_chunk(ranges.pop(), function() {
+        processingQueue.push(Chunk.fromPoint(new Point(0, 0)));
+        getNonEmptyChunks(processingQueue.pop(), function() {
             doc.body.querySelector('#container').innerHTML = '';
             doc.querySelector('#meta_source').innerText = JSON.stringify(map);
 
